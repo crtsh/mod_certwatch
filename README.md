@@ -1,2 +1,2 @@
 # mod_certwatch
-A simple PL/pgSQL gateway for httpd
+PL/pgSQL gateway for certwatch_db and httpd
