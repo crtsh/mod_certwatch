@@ -1,6 +1,6 @@
 /* mod_certwatch - PL/pgSQL gateway for certwatch_db and httpd
  * Written by Rob Stradling
- * Copyright (C) 2015 COMODO CA Limited
+ * Copyright (C) 2015-2016 COMODO CA Limited
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -461,7 +461,7 @@ static int certwatch_contentHandler(
 		apr_psprintf(v_request->pool,
 			"SELECT web_apis%s($1,$2,$3) -- %s",
 			strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18)
-				? "_test" : "",
+				? "" : "_test",
 			v_request->useragent_ip
 		),
 		3, NULL, t_paramValues, NULL, NULL, 0
