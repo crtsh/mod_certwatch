@@ -407,8 +407,18 @@ static int certwatch_contentHandler(
 		);
 		return OK;
 	}
+	else if (!strncmp(v_request->uri, "/test/", 6)) {
+		apr_table_set(
+			v_request->headers_out, "Location",
+			apr_psprintf(
+				v_request->pool, "https://%s/?%s",
+				v_request->hostname, v_request->args
+			)
+		);
+		return HTTP_MOVED_TEMPORARILY;
+	}
 	else if (strcmp(v_request->uri, "/") && strncmp(v_request->uri, "/?", 2)
-				&& strncmp(v_request->uri, "/test/", 6))
+			&& strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18))
 		return DECLINED;
 	else if (v_request->method_number == M_GET) {
 		if (v_request->args && *(v_request->args))
@@ -450,7 +460,8 @@ static int certwatch_contentHandler(
 		t_PGconn,
 		apr_psprintf(v_request->pool,
 			"SELECT web_apis%s($1,$2,$3) -- %s",
-			strstr(v_request->uri, "/test/") ? "_test" : "",
+			strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18)
+				? "_test" : "",
 			v_request->useragent_ip
 		),
 		3, NULL, t_paramValues, NULL, NULL, 0
