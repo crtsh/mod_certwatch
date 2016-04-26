@@ -346,14 +346,32 @@ static void certwatch_makeParamArrays(
 		);
 	}
 
-	if (strlen(*v_nameArray) > 0)
+	if ((strlen(v_request->unparsed_uri) > 1)
+			&& (!strstr(v_request->unparsed_uri, "/?"))) {
+		t_offset = v_request->uri + 1;
+		if (!strncmp(t_offset, "_ROB_IS_TESTING_/", 17))
+			t_offset += 17;
+		*v_nameArray = apr_psprintf(
+			v_request->pool, "%s,\"output\"", *v_nameArray
+		);
+		(void)escapeArrayString(v_request->pool, &t_escaped, t_offset);
+		*v_valueArray = apr_psprintf(
+			v_request->pool, "%s,%s", *v_valueArray, t_escaped
+		);
+	}
+
+	if (strlen(*v_nameArray) > 0) {
 		*v_nameArray = apr_psprintf(
 			v_request->pool, "{%s}", (*v_nameArray) + 1
 		);
-	if (strlen(*v_valueArray) > 0)
 		*v_valueArray = apr_psprintf(
 			v_request->pool, "{%s}", (*v_valueArray) + 1
 		);
+	}
+	else {
+		*v_nameArray = NULL;
+		*v_valueArray = NULL;
+	}
 }
 
 
@@ -373,6 +391,7 @@ static int certwatch_contentHandler(
 	PGconn* t_PGconn = NULL;
 	PGresult* t_PGresult = NULL;
 	const char* t_paramValues[3];
+	char* t_requestParams = NULL;
 	char* t_nameArray = NULL;
 	char* t_valueArray = NULL;
 	char* t_response = NULL;
@@ -380,6 +399,7 @@ static int certwatch_contentHandler(
 	char* t_name;
 	char* t_value;
 	char* t_next;
+	char* t_uri;
 	unsigned char* t_body_data = NULL;
 	long t_body_size = 0;
 	int t_response_len = 0;
@@ -395,6 +415,15 @@ static int certwatch_contentHandler(
 			v_request->per_dir_config, &certwatch_module
 		);
 	if (!t_certWatchDirConfig)
+		return DECLINED;
+
+	/* If there's a dot in the path, decline to handle it here:
+	  images, robots.txt, etc */
+	t_uri = apr_pstrdup(v_request->pool, v_request->unparsed_uri);
+	t_value = ap_strchr(t_uri, '?');
+	if (t_value)
+		*t_value = '\0';
+	if (ap_strchr(t_uri, '.') != NULL)
 		return DECLINED;
 
 	/* Process this request */
@@ -417,29 +446,20 @@ static int certwatch_contentHandler(
 		);
 		return HTTP_MOVED_TEMPORARILY;
 	}
-	else if (strcmp(v_request->uri, "/") && strncmp(v_request->uri, "/?", 2)
-			&& strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18))
-		return DECLINED;
-	else if (v_request->method_number == M_GET) {
-		if (v_request->args && *(v_request->args))
-			/* There is a query string and it's more than just a
-			  single "?" character */
-			certwatch_makeParamArrays(
-				v_request, v_request->args, &t_nameArray,
-				&t_valueArray
-			);
-	}
+	else if (v_request->method_number == M_GET)
+		t_requestParams = v_request->args;
 	else if (v_request->method_number == M_POST) {
 		if (certwatch_read_body(v_request, &t_body_data, &t_body_size)
 				!= OK)
 			return DECLINED;
-		certwatch_makeParamArrays(
-			v_request, (char*)t_body_data, &t_nameArray,
-			&t_valueArray
-		);
+		t_requestParams = (char*)t_body_data;
 	}
 	else
 		return DECLINED;
+
+	certwatch_makeParamArrays(
+		v_request, t_requestParams, &t_nameArray, &t_valueArray
+	);
 
 	/* Acquire a PostgreSQL database connection.  If necessary, block until
 	  a connection becomes available */
