@@ -1,6 +1,6 @@
 /* mod_certwatch - PL/pgSQL gateway for certwatch_db and httpd
  * Written by Rob Stradling
- * Copyright (C) 2015-2016 COMODO CA Limited
+ * Copyright (C) 2015-2017 COMODO CA Limited
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,8 +16,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* PostgreSQL connector module header file */
-#include "mod_pgconn/mod_pgconn.h"
+/* Apache 2.0 include files */
+#include "apr_lib.h"
+#include "apr_strings.h"
+#include "httpd.h"
+#include "http_config.h"
+#include "http_log.h"
+#include "http_protocol.h"
+
+/* PostgreSQL include files */
+#include "libpq-fe.h"
+
 
 #if (AP_SERVER_MAJORVERSION_NUMBER == 2) && (AP_SERVER_MINORVERSION_NUMBER < 4)
 	#define useragent_ip	connection->remote_ip
@@ -26,20 +35,12 @@
 
 /* Typedef for per-directory configuration information */
 typedef struct tCertWatchDirConfig {
-	tPGconnContainer* m_PGconnContainer;
+	char* m_connInfo;
 } tCertWatchDirConfig;
 
 
 /* Forward reference for module record */
 module AP_MODULE_DECLARE_DATA certwatch_module;
-
-
-/* Imported functions from mod_pgconn, the PostgreSQL connector module */
-static APR_OPTIONAL_FN_TYPE(getPGconnContainerByName)* getPGconnContainerByName;
-static APR_OPTIONAL_FN_TYPE(acquirePGconn)* acquirePGconn;
-static APR_OPTIONAL_FN_TYPE(releasePGconn)* releasePGconn;
-static APR_OPTIONAL_FN_TYPE(measurePGconnAvailability)*
-						measurePGconnAvailability;
 
 
 /******************************************************************************
@@ -63,51 +64,6 @@ static void* certwatch_dirConfig_create(
 	);
 
 	return (void*)t_certWatchDirConfig;
-}
-
-
-/******************************************************************************
- * PGconn_command()                                                           *
- *   Process the "PGconn" command.                                            *
- *                                                                            *
- * IN:	v_cmdParms - various server configuration details.                    *
- * 	v_certWatchDirConfig - the per-directory config structure.            *
- * 	v_PGconnName - the name of the <PGconn> container to use for this     *
- * 			module/directory.                                     *
- * 	v_moduleName - must be "certwatch" for this module to process this    *
- * 			command.                                              *
- *                                                                            *
- * Returns:	NULL or an error message.                                     *
- ******************************************************************************/
-static const char* PGconn_command(
-	cmd_parms* v_cmdParms,
-	void* v_certWatchDirConfig,
-	const char* v_moduleName,
-	const char* v_PGconnName
-)
-{
-	tPGconnServerConfig* t_PGconnServerConfig =
-		(tPGconnServerConfig*)ap_get_module_config(
-			v_cmdParms->server->module_config, &pgconn_module
-		);
-
-	/* Check if this directive should be handled by another module */
-	if (!v_PGconnName)
-		return DECLINE_CMD;
-	else if (strcasecmp(v_moduleName, "certwatch"))
-		return DECLINE_CMD;
-
-	/* Find the desired <PGconn> container */
-	#define t_certWatchDirConfig					\
-		((tCertWatchDirConfig*)v_certWatchDirConfig)
-	t_certWatchDirConfig->m_PGconnContainer = getPGconnContainerByName(
-		t_PGconnServerConfig, v_PGconnName
-	);
-	if (t_certWatchDirConfig->m_PGconnContainer)
-		return NULL;	/* <PGconn> container found OK */
-	#undef t_certWatchDirConfig
-
-	return "Invalid Connection Name";
 }
 
 
@@ -427,16 +383,7 @@ static int certwatch_contentHandler(
 		return DECLINED;
 
 	/* Process this request */
-	if (!strcmp(v_request->uri, "/PGconn-status")) {
-		ap_rprintf(
-			v_request, "%d%% of connections available\n",
-			measurePGconnAvailability(
-				t_certWatchDirConfig->m_PGconnContainer
-			)
-		);
-		return OK;
-	}
-	else if (!strncmp(v_request->uri, "/test/", 6)) {
+	if (!strncmp(v_request->uri, "/test/", 6)) {
 		apr_table_set(
 			v_request->headers_out, "Location",
 			apr_psprintf(
@@ -461,14 +408,16 @@ static int certwatch_contentHandler(
 		v_request, t_requestParams, &t_nameArray, &t_valueArray
 	);
 
-	/* Acquire a PostgreSQL database connection.  If necessary, block until
-	  a connection becomes available */
-	if (acquirePGconn(t_certWatchDirConfig->m_PGconnContainer, &t_PGconn)
-							!= PGCONN_ACQUIRED) {
+	/* Open a connection to the PostgreSQL database.  No connection pooling
+	  is performed here, so use of a connection pooler such as PgBouncer is
+	  recommended */
+	t_PGconn = PQconnectdb(t_certWatchDirConfig->m_connInfo);
+	if (PQstatus(t_PGconn) != CONNECTION_OK) {
 		ap_log_error(
 			APLOG_MARK, APLOG_ERR, 0, NULL,
-			"acquirePGconn() failed"
+			"PQconnectdb() failed"
 		);
+		PQfinish(t_PGconn);
 		return DECLINED;
 	}
 
@@ -487,15 +436,8 @@ static int certwatch_contentHandler(
 		3, NULL, t_paramValues, NULL, NULL, 0
 	);
 
-	/* Release the PostgreSQL database connection */
-	if (releasePGconn(t_certWatchDirConfig->m_PGconnContainer, &t_PGconn)
-							!= PGCONN_RELEASED) {
-		ap_log_error(
-			APLOG_MARK, APLOG_ERR, 0, NULL,
-			"releasePGconn() failed"
-		);
-		goto label_return;
-	}
+	/* Close the connection to the PostgreSQL database */
+	PQfinish(t_PGconn);
 
 	/* Ensure that the SQL query was successful */
 	if (PQresultStatus(t_PGresult) != PGRES_TUPLES_OK) {
@@ -573,9 +515,10 @@ label_return:
   - Command Table                                                            -
   ----------------------------------------------------------------------------*/
 static const command_rec certwatch_commandTable[] = {
-	AP_INIT_TAKE12(
-		"PGconn", PGconn_command, NULL, ACCESS_CONF,
-		"a <PGconn> container name"
+	AP_INIT_TAKE1(
+		"ConnInfo", ap_set_string_slot,
+		(void*)APR_OFFSETOF(tCertWatchDirConfig, m_connInfo),
+		ACCESS_CONF, "PostgreSQL connection string"
 	),
 	{ NULL }
 };
@@ -588,16 +531,6 @@ static void certwatch_registerHooks(
 	apr_pool_t* const v_pool_unused
 )
 {
-	/* Import PostgreSQL connector functions */
-	getPGconnContainerByName = APR_RETRIEVE_OPTIONAL_FN(
-		getPGconnContainerByName
-	);
-	acquirePGconn = APR_RETRIEVE_OPTIONAL_FN(acquirePGconn);
-	releasePGconn = APR_RETRIEVE_OPTIONAL_FN(releasePGconn);
-	measurePGconnAvailability = APR_RETRIEVE_OPTIONAL_FN(
-		measurePGconnAvailability
-	);
-
 	/* Register HTTP(S) content handler - this runs once for each HTTP
 	  request */
 	ap_hook_handler(

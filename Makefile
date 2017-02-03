@@ -9,8 +9,8 @@ APXS=apxs
 APACHECTL=apachectl
 
 #   additional defines, includes and libraries
-LDFLAGS=-ldb -lcrypto -lssl
-DEFS = -std=gnu99 -pedantic -Wall -Wno-format -I..
+LDFLAGS=-lpq
+DEFS = -std=c99 -pedantic -Wall -Wno-format -I..
 
 #   the default target
 all: local-shared-build
