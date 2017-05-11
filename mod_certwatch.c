@@ -453,6 +453,10 @@ static int certwatch_contentHandler(
 	  set or modified? */
 	t_response = PQgetvalue(t_PGresult, 0, 0);
 	t_response_len = PQgetlength(t_PGresult, 0, 0);
+	if (t_response_len == 0) {
+		t_returnCode = DECLINED;
+		goto label_return;
+	}
 	#define C_HTTP_HEADERS		"[BEGIN_HEADERS]\n"
 	#define C_HTTP_HEADERS_CLOSE	"[END_HEADERS]\n"
 	if (!strncmp(t_response, C_HTTP_HEADERS, strlen(C_HTTP_HEADERS))) {
