@@ -373,13 +373,16 @@ static int certwatch_contentHandler(
 	if (!t_certWatchDirConfig)
 		return DECLINED;
 
-	/* If there's a dot in the path, decline to handle it here:
-	  images, robots.txt, etc */
+	/* Isolate the path component of the URI */
 	t_uri = apr_pstrdup(v_request->pool, v_request->unparsed_uri);
 	t_value = ap_strchr(t_uri, '?');
 	if (t_value)
 		*t_value = '\0';
-	if (ap_strchr(t_uri, '.') != NULL)
+
+	/* If there's a dot in the path, decline to handle it here (except for
+	  *.json): images, robots.txt, etc */
+	t_value = ap_strrchr(t_uri, '.');
+	if ((t_value != NULL) && (strcmp(t_value, ".json") != 0))
 		return DECLINED;
 
 	/* Process this request */
