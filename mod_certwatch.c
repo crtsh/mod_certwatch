@@ -1,6 +1,6 @@
 /* mod_certwatch - PL/pgSQL gateway for certwatch_db and httpd
  * Written by Rob Stradling
- * Copyright (C) 2015-2017 COMODO CA Limited
+ * Copyright (C) 2015-2019 Sectigo Limited
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+#include <time.h>
 
 /* Apache 2.0 include files */
 #include "apr_lib.h"
@@ -414,6 +416,7 @@ static int certwatch_contentHandler(
 	/* Open a connection to the PostgreSQL database.  No connection pooling
 	  is performed here, so use of a connection pooler such as PgBouncer is
 	  recommended */
+	time_t t_startTime = time(NULL);
 	t_PGconn = PQconnectdb(t_certWatchDirConfig->m_connInfo);
 	if (PQstatus(t_PGconn) != CONNECTION_OK) {
 		ap_log_error(
@@ -449,7 +452,22 @@ static int certwatch_contentHandler(
 			"PQexecParams() => %s",
 			PQresultErrorMessage(t_PGresult)
 		);
-		goto label_return;
+
+		/* Return a 503 with an error webpage */
+		time_t t_endTime = time(NULL);
+		struct tm t_tm;
+		gmtime_r(&t_endTime, &t_tm);
+		v_request->status = HTTP_SERVICE_UNAVAILABLE;
+		v_request->content_type = "text/html; charset=UTF-8";
+		t_response = apr_psprintf(
+			v_request->pool,
+"<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\"><HTML><HEAD><TITLE>crt.sh | ERROR!</TITLE><LINK href=\"//fonts.googleapis.com/css?family=Roboto+Mono|Roboto:400,400i,700,700i\" rel=\"stylesheet\"><STYLE type=\"text/css\">body{color:#888888;font:12pt Roboto,sans-serif;padding-top:10px;text-align:center} span{border-radius:10px} span.title{background-color:#00B373;color:#FFFFFF;font:bold 18pt Roboto,sans-serif;padding:0px 5px} span.whiteongrey{background-color:#D9D9D6;color:#FFFFFF;font:bold 18pt Roboto,sans-serif;padding:0px 5px} .copyright{font:8pt Roboto,sans-serif;color:#00B373}</STYLE></HEAD><BODY><A style=\"text-decoration:none\" href=\"/\"><SPAN class=\"title\">crt.sh</SPAN></A>&nbsp; <SPAN class=\"whiteongrey\">Certificate Search</SPAN><BR><BR><BR><BR>Sorry, something went wrong... :-(<BR><BR>Your request was terminated by the crt.sh database server after <B>%d</B> second%s with the following messages:<BR><BR><TEXTAREA readonly rows=\"8\" cols=\"100\">%s</TEXTAREA><BR><BR>Unfortunately, searches that would produce many results may never succeed. For other requests, please try again later.<BR><BR><BR><P class=\"copyright\">&copy; Sectigo Limited 2015-%d. All rights reserved.</P><DIV><A href=\"https://sectigo.com/\"><IMG src=\"/sectigo_s.png\"></A>&nbsp;<A href=\"https://github.com/crtsh\"><IMG src=\"/GitHub-Mark-32px.png\"></A></DIV></BODY></HTML>",
+			(t_endTime - t_startTime), (((t_endTime - t_startTime) == 1) ? "": "s"),
+			PQresultErrorMessage(t_PGresult), (t_tm.tm_year + 1900)
+		);
+		t_response_len = strlen(t_response);
+		t_returnCode = OK;
+		goto label_outputResponse;
 	}
 
 	/* Does the function's response require any HTTP Response headers to be
@@ -505,10 +523,11 @@ static int certwatch_contentHandler(
 	if (!t_endOfHeaders)
 		v_request->content_type = "text/html; charset=UTF-8";
 
-	/* Output the response */
-	ap_rwrite(t_response, t_response_len, v_request);
-
 	t_returnCode = OK;
+
+	/* Output the response */
+label_outputResponse:
+	ap_rwrite(t_response, t_response_len, v_request);
 
 label_return:
 	if (t_PGresult)
