@@ -409,6 +409,12 @@ static int certwatch_contentHandler(
 	else
 		return DECLINED;
 
+	const char* t_accept = apr_table_get(v_request->headers_in, "Accept");
+	if (t_accept && (!strcmp(t_accept, "application/json")))
+		t_requestParams = apr_psprintf(
+			v_request->pool, "output=json&%s", t_requestParams
+		);
+
 	certwatch_makeParamArrays(
 		v_request, t_requestParams, &t_nameArray, &t_valueArray
 	);
