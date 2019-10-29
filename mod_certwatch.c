@@ -440,10 +440,10 @@ static int certwatch_contentHandler(
 	t_PGresult = PQexecParams(
 		t_PGconn,
 		apr_psprintf(v_request->pool,
-			"SELECT web_apis%s($1,$2,$3) -- %s",
+			"SELECT web_apis%s($1,$2,$3) -- [%s] %s",
 			strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18)
 				? "" : "_test",
-			v_request->useragent_ip
+			v_request->useragent_ip, v_request->the_request
 		),
 		3, NULL, t_paramValues, NULL, NULL, 0
 	);
