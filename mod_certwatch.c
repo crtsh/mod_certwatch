@@ -1,6 +1,6 @@
 /* mod_certwatch - PL/pgSQL gateway for certwatch_db and httpd
  * Written by Rob Stradling
- * Copyright (C) 2015-2019 Sectigo Limited
+ * Copyright (C) 2015-2020 Sectigo Limited
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -437,13 +437,18 @@ static int certwatch_contentHandler(
 	t_paramValues[0] = strrchr(v_request->uri, '/') + 1;
 	t_paramValues[1] = t_nameArray;
 	t_paramValues[2] = t_valueArray;
+	const char* t_xForwardedFor = apr_table_get(
+		v_request->headers_in, "X-Forwarded-For"
+	);
 	t_PGresult = PQexecParams(
 		t_PGconn,
 		apr_psprintf(v_request->pool,
 			"SELECT web_apis%s($1,$2,$3) -- [%s] %s",
 			strncmp(v_request->uri, "/_ROB_IS_TESTING_/", 18)
 				? "" : "_test",
-			v_request->useragent_ip, v_request->the_request
+			t_xForwardedFor ? t_xForwardedFor
+					: v_request->useragent_ip,
+			v_request->the_request
 		),
 		3, NULL, t_paramValues, NULL, NULL, 0
 	);
