@@ -1,5 +1,5 @@
 builddir=.
-top_srcdir=/usr/lib/apache2
+top_srcdir=/usr/share/apache2
 top_builddir=${top_srcdir}
 include ${top_srcdir}/build/special.mk
 builddir=.
@@ -10,7 +10,7 @@ APACHECTL=apachectl
 
 #   additional defines, includes and libraries
 LDFLAGS=-lpq
-DEFS = -std=c99 -pedantic -Wall -Wno-format -I..
+DEFS = -std=c99 -pedantic -Wall -I.. -I/usr/include/postgresql
 
 #   the default target
 all: local-shared-build
